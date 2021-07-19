@@ -213,48 +213,6 @@ with torch.no_grad():
             sequence_all[batch_idx]["event"] = init
             sequence_all[batch_idx]["effect_type"] = attr
 
-        XMB = model_utils.prepare_position_embeddings(
-            opt, text_encoder.encoder, XMB.unsqueeze(-1))
-
-        steps = 0
-
-        lm_probs = lm_model(XMB.unsqueeze(1), sequence_mask=MMB)
-        # batch_size, length, len(vocab)
-        dist = lm_probs[:, -1, :].squeeze()
-        # batch_size, len(vocab)
-
-        indices = Ref[:, steps]
-
-        tmp_range = torch.LongTensor(range(0, batch_size))
-
-        seqs = indices.view(batch_size, -1).clone()
-
-        ended = (seqs == end_token).float()
-        pro = torch.log(dist[tmp_range, indices].unsqueeze(1))
-        next_pos = XMB[:, -1:, 1] + 1
-        next_x = torch.cat((indices.view(batch_size, -1), next_pos), -1).unsqueeze(1)
-        XMB = torch.cat((XMB, next_x), 1)
-        MMB = torch.cat([MMB, torch.ones(XMB.size(0), 1, device=MMB.device)], 1)
-
-        # Sample from top k
-
-        while ended.sum().item() != batch_size and steps != Ref.shape[1]:
-            steps += 1
-
-            lm_probs = lm_model(XMB.unsqueeze(1), sequence_mask=MMB)
-            indices = Ref[:, steps]
-            ended = ended + (indices.unsqueeze(1) == end_token).float() * (1 - ended)
-
-            dist = lm_probs[:, -1, :].squeeze()
-            pro += (1 - ended) * torch.log(dist[tmp_range, indices].unsqueeze(1))
-            # Sample from top k
-            indices = indices.view(batch_size, -1)
-
-            indices = indices * (1 - ended).long() + ended.long() * end_token
-
-            seqs = torch.cat([seqs, indices], 1)
-
-            XMB, MMB = append_batch(XMB, indices, MMB)
 
         Ref = Ref.masked_fill(Ref==0, end_token)
         XMB = model_utils.prepare_position_embeddings(
@@ -265,11 +223,11 @@ with torch.no_grad():
 
         for batch_idx in range(batch_size):
             effect = " ".join("".join(
-                [text_encoder.decoder[tok.item()].replace('</w>', ' ').replace('\n', '') for tok in seqs[batch_idx] if
+                [text_encoder.decoder[tok.item()].replace('</w>', ' ').replace('\n', '') for tok in Ref[batch_idx] if
                  tok != end_token]).split())
 
             sequence_all[batch_idx]['effect'] = effect
-            sequence_all[batch_idx]['score'] = pro[batch_idx, 0].item()
+            sequence_all[batch_idx]['score'] = probs[batch_idx].item()
         final_sequences += sequence_all
 
 import json
